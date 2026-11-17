@@ -19,7 +19,7 @@ re-priced on today's curve and stress-tested in a few clicks.
 
 | Tab | Content |
 |---|---|
-| 1 Market | Live Treasury par curve and overnight SOFR; bootstrapped discount factors, zeros and forwards; 2s10s slope history |
+| 1 Market | Live Treasury par curve, overnight SOFR and MOVE index; bootstrapped discount factors, zeros and forwards; 2s10s slope history |
 | 2 Issuer solutions | Callable = bullet − receiver swaption, solved for the fair callable coupon; pickup vs vol; liability swaps; downloadable indicative term sheet |
 | 3 Investor notes | Range accrual fair coupon from in-range probabilities; CMS steepener payoff |
 | 4 Methodology & limits | Every assumption and simplification, stated explicitly |
@@ -32,7 +32,8 @@ The sidebar applies a parallel curve shift and a vol level to every product at o
 |---|---|
 | Treasury par yields | [US Treasury daily par yield curve](https://home.treasury.gov/resource-center/data-chart-center/interest-rates) – live |
 | Overnight SOFR | [Federal Reserve Bank of New York](https://www.newyorkfed.org/markets/reference-rates/sofr) – live |
-| Swap spreads, normal vol | **Assumptions set in the sidebar.** Live SOFR swap and swaption quotes are not freely available, so the swap curve is Treasury par yield + a user swap spread. |
+| Rates vol | ICE BofA MOVE index via Yahoo Finance (delayed) – live. Used as a **proxy** for swaption normal vol: it measures short-dated Treasury options, not the exact expiry/tenor of each structure. |
+| Swap spreads | **Calibrated by hand.** SOFR swap quotes are licensed data, so the swap curve is Treasury par yield + a swap spread I calibrate by hand. The calibration is stored in `data/calibration.json`; its commit history is a log of every update. |
 
 If a download fails the app falls back to an illustrative sample file and shows a warning.
 
@@ -52,6 +53,7 @@ fisd/data.py        Treasury + NY Fed downloads
 fisd/curve.py       par rates -> discount factors, zeros, forwards, forward swap rates
 fisd/pricing.py     bond maths, Bachelier (normal) swaption model
 fisd/products.py    callable, liability swaps, range accrual, steepener
+fisd/store.py       saved swap spread calibration
 tests/test_core.py  sanity checks
 ```
 

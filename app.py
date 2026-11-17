@@ -1,4 +1,5 @@
 """Fixed Income Structuring Desk -- run with:  streamlit run app.py"""
+import hmac
 from datetime import date
 
 import numpy as np
@@ -6,11 +7,14 @@ import pandas as pd
 import streamlit as st
 
 from fisd.curve import GRID, bootstrap, interpolate_par
-from fisd.data import load_sofr, load_treasury_curve
+from fisd.data import load_move, load_sofr, load_treasury_curve
 from fisd.products import (callable_vs_bullet, fixed_to_floating, floating_to_fixed,
                            range_accrual, steepener_coupon)
+from fisd.store import load_calibration, save_calibration
 
 st.set_page_config(page_title="FI Structuring Desk", layout="wide")
+
+FALLBACK_VOL_BP = 95          # used only if the MOVE index cannot be downloaded
 
 
 def pct(x, digits=3):
@@ -21,25 +25,64 @@ def pct(x, digits=3):
 def get_market_data():
     history, source = load_treasury_curve()
     sofr, sofr_date = load_sofr()
-    return history, source, sofr, sofr_date
+    return history, source, sofr, sofr_date, load_move()
 
 
-history, source, sofr, sofr_date = get_market_data()
+history, source, sofr, sofr_date, move = get_market_data()
 latest = history.iloc[-1].dropna()
 curve_date = history.index[-1].date()
 known_tenors = [t for t in latest.index if t <= 10]
 
 # ------------------------------------------------------------------- sidebar
-st.sidebar.header("Market assumptions")
+calibration = load_calibration()      # swap spreads saved in data/calibration.json
+st.sidebar.header("Swap curve calibration")
 st.sidebar.caption(
-    "Live SOFR swap quotes are not freely available, so the swap curve is "
-    "Treasury par yield + a swap spread you set here."
+    "SOFR swap quotes are licensed data, so swap spreads are calibrated by hand. "
+    f"Saved calibration: {calibration['as_of']}. Edit the rates to test your own."
 )
-spread_2y = st.sidebar.number_input("2Y swap spread (bp)", value=-20.0, step=1.0)
-spread_5y = st.sidebar.number_input("5Y swap spread (bp)", value=-30.0, step=1.0)
-spread_10y = st.sidebar.number_input("10Y swap spread (bp)", value=-45.0, step=1.0)
+swap_inputs, start_values = {}, {}
+for tenor in (2, 5, 10):
+    saved_spread = calibration["spreads_bp"][str(tenor)]
+    start_values[tenor] = round((float(latest[float(tenor)]) + saved_spread / 10000) * 100, 3)
+    swap_inputs[tenor] = st.sidebar.number_input(
+        f"{tenor}Y SOFR swap rate (%)", value=start_values[tenor], step=0.01, format="%.3f")
+spread_2y, spread_5y, spread_10y = [
+    (swap_inputs[t] / 100 - float(latest[float(t)])) * 10000 for t in (2, 5, 10)]
+st.sidebar.caption(
+    f"Implied swap spreads: 2Y {spread_2y:+.1f} bp, 5Y {spread_5y:+.1f} bp, 10Y {spread_10y:+.1f} bp")
+edited = any(abs(swap_inputs[t] - start_values[t]) > 1e-9 for t in (2, 5, 10))
+spreads_as_of = "edited in this session" if edited else f"calibrated {calibration['as_of']}"
+
+with st.sidebar.expander("Owner: save for all visitors"):
+    password = st.text_input("Password", type="password")
+    if st.button("Save calibration"):
+        try:
+            admin_password = st.secrets["ADMIN_PASSWORD"]
+            token, repo = st.secrets["GITHUB_TOKEN"], st.secrets["GITHUB_REPO"]
+        except Exception:
+            st.error("Saving is not set up yet (secrets missing).")
+        else:
+            if not hmac.compare_digest(str(password), str(admin_password)):
+                st.error("Wrong password.")
+            else:
+                new_calibration = {
+                    "as_of": curve_date.strftime("%d %b %Y"),
+                    "spreads_bp": {"2": round(spread_2y, 1), "5": round(spread_5y, 1), "10": round(spread_10y, 1)},
+                }
+                ok, message = save_calibration(token, repo, new_calibration)
+                (st.success if ok else st.error)(message)
+
+st.sidebar.header("Scenario")
 shift_bp = st.sidebar.slider("Scenario: parallel shift (bp)", -200, 200, 0, step=25)
-vol_bp = st.sidebar.slider("Normal vol (bp / year)", 40, 180, 95, step=5)
+
+if move is not None:
+    default_vol = int(min(180, max(40, round(move / 5) * 5)))     # snap to the slider grid
+    vol_note = f"Default follows the MOVE index ({move:.1f}, Yahoo Finance, delayed) as a proxy."
+else:
+    default_vol = FALLBACK_VOL_BP
+    vol_note = "MOVE index download failed; default is a manual assumption."
+vol_bp = st.sidebar.slider("Normal vol (bp / year)", 40, 180, default_vol, step=5)
+st.sidebar.caption(vol_note)
 
 treasury_par = interpolate_par(known_tenors, latest[known_tenors].values)
 swap_spread = np.interp(GRID, [2, 5, 10], [spread_2y, spread_5y, spread_10y]) / 10000
@@ -60,7 +103,9 @@ tab_market, tab_issuer, tab_investor, tab_method = st.tabs(
 
 # -------------------------------------------------------------------- market
 with tab_market:
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c5.metric("MOVE index (rates vol)", f"{move:.1f}" if move is not None else "n/a",
+              help="ICE BofA MOVE: implied vol of Treasury options in bp per year")
     c1.metric("SOFR (overnight)", pct(sofr, 2) if sofr is not None else "n/a",
               help=f"NY Fed, effective {sofr_date}" if sofr_date else "NY Fed download failed")
     c2.metric("2Y Treasury", pct(latest[2.0], 2))
@@ -143,7 +188,7 @@ with tab_issuer:
 | Bullet alternative | {pct(res['bullet_coupon'])} |
 | Coupon pickup | {res['pickup_bp']:.1f} bp |
 | Embedded option value | ${res['option_value'] * size_mm:.2f}mm |
-| Swap curve | Treasury par + swap spread, shift {shift_bp} bp |
+| Swap curve | Treasury par + swap spread ({spreads_as_of}), shift {shift_bp} bp |
 | Normal vol | {vol_bp} bp |
 | Data | {source} |
 """
@@ -198,8 +243,9 @@ with tab_method:
 |---|---|
 | Treasury par yields, 1Y-10Y | US Treasury daily par yield curve (live) |
 | Overnight SOFR | Federal Reserve Bank of New York (live) |
-| Swap spreads | **My assumption** (sidebar) -- no free live SOFR swap feed |
-| Normal vol | **My assumption** (sidebar) -- one flat number, no vol surface |
+| MOVE index | Yahoo Finance (delayed) -- sets the default vol |
+| Swap spreads | **Calibrated by hand** and saved in `data/calibration.json`; the date is shown in the sidebar. SOFR swap quotes are licensed data |
+| Normal vol | One flat number, defaulting to MOVE. MOVE is a **proxy**: it measures short-dated Treasury options, not the swaption expiry/tenor each structure needs |
 | Credit / funding spreads, fees | User inputs |
 
 ### Method
