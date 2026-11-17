@@ -6,7 +6,7 @@ debt / fixed income structuring desk frames a conversation:
 - **Issuer side** – bullet vs callable (e.g. 5NC2): what coupon pickup pays for the call option? What does the bond cost swapped to floating, or a floating loan swapped to fixed?
 - **Investor side** – range accrual note: where does the enhanced coupon come from? CMS steepener payoff profile against today's 2s10s slope.
 
-**Live app:** _add your Streamlit link here_
+**Live app:** https://fi-structuring-desk-qmiktdrdzygowwdbzeysbp.streamlit.app/
 
 ## Why I built it
 
