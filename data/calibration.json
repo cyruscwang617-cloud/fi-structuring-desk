@@ -1,4 +1,8 @@
 {
-  "as_of": "placeholder, not calibrated",
-  "spreads_bp": {"2": -20.0, "5": -30.0, "10": -45.0}
+  "as_of": "16 Nov 2026",
+  "spreads_bp": {
+    "2": -20.0,
+    "5": -30.0,
+    "10": -45.0
+  }
 }
