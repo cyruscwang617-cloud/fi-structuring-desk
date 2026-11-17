@@ -1,4 +1,5 @@
-"""Market data: US Treasury par yield curve (treasury.gov) and SOFR (NY Fed).
+"""Market data: US Treasury par yield curve (treasury.gov), SOFR (NY Fed) and
+the MOVE rates volatility index (Yahoo Finance, delayed).
 
 Both sources are free and need no API key. If a download fails, the app falls
 back to a small ILLUSTRATIVE sample file so the demo still runs -- and says so.
@@ -17,6 +18,7 @@ TREASURY_URL = (
     "?type=daily_treasury_yield_curve&field_tdr_date_value={year}&page&_format=csv"
 )
 SOFR_URL = "https://markets.newyorkfed.org/api/rates/secured/sofr/last/1.json"
+MOVE_URL = "https://query1.finance.yahoo.com/v8/finance/chart/%5EMOVE?range=5d&interval=1d"
 SAMPLE_FILE = Path(__file__).resolve().parent.parent / "data" / "sample_curve.csv"
 HEADERS = {"User-Agent": "Mozilla/5.0 (fi-structuring-desk; educational project)"}
 
@@ -59,3 +61,24 @@ def load_sofr():
         return latest["percentRate"] / 100, latest["effectiveDate"]
     except Exception:
         return None, None
+
+
+def parse_yahoo_chart(payload):
+    """Pull the latest level out of Yahoo's chart JSON."""
+    result = payload["chart"]["result"][0]
+    price = result["meta"].get("regularMarketPrice")
+    if price is None:                       # fall back to the last daily close
+        closes = [c for c in result["indicators"]["quote"][0]["close"] if c is not None]
+        price = closes[-1]
+    return float(price)
+
+
+def load_move():
+    """MOVE index = implied vol of Treasury options, in bp per year.
+    Used as a live PROXY for swaption normal vol. Returns None if unavailable."""
+    try:
+        resp = requests.get(MOVE_URL, headers=HEADERS, timeout=15)
+        resp.raise_for_status()
+        return parse_yahoo_chart(resp.json())
+    except Exception:
+        return None
